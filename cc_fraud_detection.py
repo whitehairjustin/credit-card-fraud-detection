@@ -9,6 +9,9 @@ import os.path
 from numpy.lib.recfunctions import append_fields
 import bisect
 import time
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+#from principal_component_analysis import PCA
 
 
 fraud_data_file_name = './Fraud/Fraud_Data.csv'
@@ -68,6 +71,15 @@ def convert_to_timestamp(signup_time):
     format = "%Y-%m-%d %H:%M:%S"
     return time.mktime(time.strptime(str(signup_time), format))
 
+# Compare y_true to y_pred and return the accuracy
+def accuracy_score(y_true, y_pred):
+    correct = 0
+    for i in range(len(y_true)):
+        diff = y_true[i] - y_pred[i]
+        if diff == np.zeros(np.shape(diff)):
+            correct += 1
+    return correct / len(y_true)
+
 
 # Main body
 def main():
@@ -94,17 +106,50 @@ def main():
     # split data to training and testing data
 
     #print(data)
-    print(data_with_country)
+    #print(data_with_country)
     #print(data_with_country['country'][1])
 
     # data for random forest training
     data_random_forest = []
-    data_random_forest = data_with_country[:,['devide_id', 'source', 'browser', 'sex', 'age', 'country', 'sp_difference', 'class']]
+    #data_random_forest = data_with_country[:,['devide_id', 'source', 'browser', 'sex', 'age', 'country', 'sp_difference', 'class']]
+    data_random_forest = data_with_country[['device_id', 'source', 'browser', 'sex', 'age', 'country', 'sp_difference']]
+    class_random_forest = data_with_country['class']
+    #class_random_forest = class_random_forest.astype(int)
     print(data_random_forest)
+    print(class_random_forest)
+
+    a = np.array(class_random_forest)
+    print(a)
 
     # seperate training and testing data
+    X_train, X_test, y_train, y_test = train_test_split(class_random_forest, class_random_forest,
+                                                       train_size=0.75,
+                                                       random_state=4)
+
+    print(y_train)
+    print(y_test)
+    print(len(X_train))
+    print(sum(y_train))
+    print(len(y_train))
+    print(sum(y_test))
+    print(len(y_test))
+
+    #X = np.random.random((100, 70))
+    #Y = np.random.random((100,))
+    #print(Y)
+    #X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.33, random_state=42)
 
 
+    clf = RandomForestClassifier(n_estimators=10)
+    clf.fit(X_train, y_train)
+    y_pred = clf.predict(X_test)
+
+    accuracy = accuracy_score(y_test, y_pred)
+
+    print ("Accuracy:", accuracy)
+
+    #pca = PCA()
+    #pca.plot_in_2d(X_test, y_pred, title="Random Forest", accuracy=accuracy, legend_labels=data.target_names)
 
     # print out the result
     print("Here is the output")
