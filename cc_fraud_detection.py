@@ -11,8 +11,10 @@ import bisect
 import time
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
-#from principal_component_analysis import PCA
-
+from sklearn import preprocessing
+from sklearn.metrics import confusion_matrix
+import matplotlib.pyplot as plt
+from sklearn.metrics import roc_curve, auc
 
 fraud_data_file_name = './Fraud/Fraud_Data.csv'
 ipaddress_to_country_file_name = './Fraud/IpAddress_to_Country.csv'
@@ -67,13 +69,28 @@ def add_country_to_data(data, ip_to_country_file):
     print('Adding country to data has finished')
     return True, data
 
+
 def convert_to_timestamp(signup_time):
-    format = "%Y-%m-%d %H:%M:%S"
-    return time.mktime(time.strptime(str(signup_time), format))
+    t_format = "%Y-%m-%d %H:%M:%S"
+    return time.mktime(time.strptime(str(signup_time), t_format))
+
+
+def convert_to_wd(signup_time):
+    t_format = "%Y-%m-%d %H:%M:%S"
+    wd_format = "%A"
+    return time.strftime(wd_format, time.strptime(str(signup_time), t_format))
+
+
+def convert_to_wy(signup_time):
+    t_format = "%Y-%m-%d %H:%M:%S"
+    wy_format = "%U"
+    return time.strftime(wy_format, time.strptime(str(signup_time), t_format))
+
 
 # Compare y_true to y_pred and return the accuracy
 def accuracy_score(y_true, y_pred):
     correct = 0
+    print(len(y_true))
     for i in range(len(y_true)):
         diff = y_true[i] - y_pred[i]
         if diff == np.zeros(np.shape(diff)):
@@ -92,6 +109,7 @@ def main():
     if is_data is False:
         sys.exit(0)
 
+    print('Preparing features')
     # verify time difference between signup and purchase
     signup_time = data_with_country['signup_time']
     purchase_time = data_with_country['purchase_time']
@@ -100,62 +118,108 @@ def main():
     purchase_time_second = np.asarray(map(convert_to_timestamp, purchase_time))
     sp_difference_time_second = purchase_time_second - signup_time_second
 
-    # add to data
     data_with_country = append_fields(data_with_country, 'sp_difference', sp_difference_time_second)
 
-    # split data to training and testing data
+    # date of week and week of year of both signup and purchase time
+    signup_time_wd = np.asarray(map(convert_to_wd, signup_time))
+    purchase_time_wd = np.asarray(map(convert_to_wd, purchase_time))
 
-    #print(data)
-    #print(data_with_country)
-    #print(data_with_country['country'][1])
+    signup_time_wy = np.asarray(map(convert_to_wy, signup_time))
+    purchase_time_wy = np.asarray(map(convert_to_wy, purchase_time))
 
-    # data for random forest training
-    data_random_forest = []
-    #data_random_forest = data_with_country[:,['devide_id', 'source', 'browser', 'sex', 'age', 'country', 'sp_difference', 'class']]
-    data_random_forest = data_with_country[['device_id', 'source', 'browser', 'sex', 'age', 'country', 'sp_difference']]
+    data_with_country = append_fields(data_with_country, 'signup_time_wd', signup_time_wd)
+    data_with_country = append_fields(data_with_country, 'purchase_time_wd', purchase_time_wd)
+    data_with_country = append_fields(data_with_country, 'signup_time_wy', signup_time_wy)
+    data_with_country = append_fields(data_with_country, 'purchase_time_wy', purchase_time_wy)
+
+    # count device_id and ip_address used by different users
+    u, indices, counts = np.unique(data_with_country['device_id'], return_inverse=True, return_counts=True)
+    device_id_count = counts[indices]
+    u, indices, counts = np.unique(data_with_country['ip_address'], return_inverse=True, return_counts=True)
+    ip_address_count = counts[indices]
+
+    data_with_country = append_fields(data_with_country, 'device_id_count', device_id_count)
+    data_with_country = append_fields(data_with_country, 'ip_address_count', ip_address_count)
+
+    # prepare data for training and testing
+    data_random_forest = data_with_country[['purchase_value', 'device_id', 'source', 'browser', 'sex', 'age', 'country', 'sp_difference', 'signup_time_wd', \
+        'purchase_time_wd', 'signup_time_wy', 'purchase_time_wy', 'device_id_count', 'ip_address_count']]
     class_random_forest = data_with_country['class']
-    #class_random_forest = class_random_forest.astype(int)
-    print(data_random_forest)
-    print(class_random_forest)
 
-    a = np.array(class_random_forest)
-    print(a)
+    # encode labels with values to train random forests
+    no_features = 14
+    data_random_forest_final = np.zeros((len(class_random_forest), no_features))
+
+    data_random_forest_final[:, 0] = np.array(data_random_forest['purchase_value'])
+
+    le = preprocessing.LabelEncoder()
+
+    le.fit(data_random_forest['device_id'])
+    data_random_forest_final[:, 1] = np.array(le.transform(data_random_forest['device_id']))
+
+    le.fit(data_random_forest['source'])
+    data_random_forest_final[:, 2] = np.array(le.transform(data_random_forest['source']))
+
+    le.fit(data_random_forest['browser'])
+    data_random_forest_final[:, 3] = np.array(le.transform(data_random_forest['browser']))
+
+    le.fit(data_random_forest['sex'])
+    data_random_forest_final[:, 4] = np.array(le.transform(data_random_forest['sex']))
+
+    le.fit(data_random_forest['age'])
+    data_random_forest_final[:, 5] = np.array(le.transform(data_random_forest['age']))
+    #data_random_forest_final[:, 5] = np.array(data_random_forest['age'])
+
+    le.fit(data_random_forest['country'])
+    data_random_forest_final[:, 6] = np.array(le.transform(data_random_forest['country']))
+
+    le.fit(data_random_forest['sp_difference'])
+    data_random_forest_final[:, 7] = np.array(le.transform(data_random_forest['sp_difference']))
+
+    le.fit(data_random_forest['signup_time_wd'])
+    data_random_forest_final[:, 8] = np.array(le.transform(data_random_forest['signup_time_wd']))
+
+    le.fit(data_random_forest['purchase_time_wd'])
+    data_random_forest_final[:, 9] = np.array(le.transform(data_random_forest['purchase_time_wd']))
+
+    le.fit(data_random_forest['signup_time_wy'])
+    data_random_forest_final[:, 10] = np.array(le.transform(data_random_forest['signup_time_wy']))
+
+    le.fit(data_random_forest['purchase_time_wy'])
+    data_random_forest_final[:, 11] = np.array(le.transform(data_random_forest['purchase_time_wy']))
+
+    data_random_forest_final[:, 12] = np.array(data_random_forest['device_id_count'])
+    data_random_forest_final[:, 13] = np.array(data_random_forest['ip_address_count'])
 
     # seperate training and testing data
-    X_train, X_test, y_train, y_test = train_test_split(class_random_forest, class_random_forest,
+    print('Training random forests')
+    X_train, X_test, y_train, y_test = train_test_split(data_random_forest_final, class_random_forest,
                                                        train_size=0.75,
-                                                       random_state=4)
+                                                       random_state=40)
 
-    print(y_train)
-    print(y_test)
-    print(len(X_train))
-    print(sum(y_train))
-    print(len(y_train))
-    print(sum(y_test))
-    print(len(y_test))
-
-    #X = np.random.random((100, 70))
-    #Y = np.random.random((100,))
-    #print(Y)
-    #X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.33, random_state=42)
-
-
-    clf = RandomForestClassifier(n_estimators=10)
+    clf = RandomForestClassifier(n_estimators=100, max_features=None, n_jobs=4, class_weight='balanced')
     clf.fit(X_train, y_train)
     y_pred = clf.predict(X_test)
+    y_pred_prob = clf.predict_proba(X_test)
 
-    accuracy = accuracy_score(y_test, y_pred)
+    # Compute ROC curve and ROC area for each class
+    fpr, tpr, _ = roc_curve(y_test, y_pred_prob[:, 1])
+    roc_auc = auc(fpr, tpr)
 
-    print ("Accuracy:", accuracy)
+    plt.title('Receiver Operating Characteristic')
+    plt.plot(fpr, tpr, 'b', label='AUC = %0.2f' % roc_auc)
+    plt.legend(loc='lower right')
+    plt.plot([0, 1], [0, 1], 'r--')
+    plt.xlim([0, 1])
+    plt.ylim([0, 1])
+    plt.ylabel('True Positive Rate')
+    plt.xlabel('False Positive Rate')
+    plt.show()
 
-    #pca = PCA()
-    #pca.plot_in_2d(X_test, y_pred, title="Random Forest", accuracy=accuracy, legend_labels=data.target_names)
-
-    # print out the result
-    print("Here is the output")
+    print('Confusion Matrix')
+    cnf_matrix = confusion_matrix(y_pred, y_test)
 
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())
